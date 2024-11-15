@@ -7,9 +7,9 @@ Software Engineer and AI/ML Enthusiast
 I am an enthusiastic Information Technology student with strong collaboration skills, committed to lifelong learning, and always seeking new opportunities to enhance my technical skills. I am skilled in web development, mobile app development, software engineering, and development. I am also an AI/ML enthusiast and learning to advance myself. I am passionate about leveraging technology to solve real-world problems.
 
 * 🌍  I'm based in Ghana
-* 🖥️  See my portfolio at [LinkedIn](http://https://www.linkedin.com/in/edwin-asare-b56269223/)
+* 🖥️  See my portfolio at [LinkedIn](https://www.linkedin.com/in/edwin-asare-b56269223/)
 * ✉️  You can contact me at [brainzsnr@gmail.com](mailto:brainzsnr@gmail.com)
-* 🚀  I'm currently working on [Skynexus](http://https://github.com/Elabs-llc/capstone)
+* 🚀  I'm currently working on [Skynexus](https://github.com/Elabs-llc/capstone)
 * 🧠  I'm learning Machine Learning with PyClubs
 * 🤝  I'm open to collaborating on I’m looking to collaborate on any project with you
 * ⚡  Fun fact: like watching action movies especially the ones with AI/ML stuffs
