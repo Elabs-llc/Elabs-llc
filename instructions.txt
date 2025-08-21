@@ -1,0 +1,39 @@
+How to Install and Manage Your VPN Service
+Your C++ VPN core is now a Windows Service. You can't just run the .exe file directly. You must install it so that Windows knows how to manage it.
+
+Run all commands from an Administrator Command Prompt.
+
+1. Compile the Code
+Compile the new vpn_service.cpp file using the command provided in the code comments. This will create vpn_service.exe.
+
+2. Install the Service
+Place the compiled vpn_service.exe in a permanent location, for example C:\MyVPN\. Then, run the following command to install it. The binPath must be the full path to your executable.
+
+sc create MyVPNService binPath= "C:\MyVPN\vpn_service.exe"
+
+If it's successful, you will see [SC] CreateService SUCCESS.
+
+3. Place the Config File
+In the same directory as your .exe (C:\MyVPN\), create a file named config.ini. Your Python UI will manage this file automatically, but for testing, you can create it manually with this content:
+
+[Credentials]
+Username=user
+Password=pass
+
+4. Control the Service
+You can now start and stop your service just like any other Windows service.
+
+To Start: sc start MyVPNService
+
+To Stop: sc stop MyVPNService
+
+To Check Status: sc query MyVPNService
+
+5. Check the Logs
+The service cannot print to the console. Instead, it logs its activity to C:\vpn_log.txt. If the service fails to start, check this file for error messages.
+
+6. Uninstall the Service
+If you need to update the executable or remove the service, you must first stop it and then delete it.
+
+sc stop MyVPNService
+sc delete MyVPNService
