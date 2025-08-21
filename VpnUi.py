@@ -1,0 +1,167 @@
+# vpn_ui.py
+# A Python GUI application to manage the C++ VPN client.
+# This script launches and terminates the compiled C++ executable.
+#
+# Prerequisites:
+# 1. Python 3 installed.
+# 2. The compiled C++ client (e.g., "tuntap_reader.exe") must be in the same
+#    directory as this script.
+
+import tkinter as tk
+from tkinter import scrolledtext, messagebox
+import subprocess
+import threading
+import os
+
+# --- Configuration ---
+# The name of your compiled C++ executable
+CPP_EXECUTABLE_NAME = "tuntap_reader.exe"
+
+# --- Global Variables ---
+vpn_process = None
+is_connected = False
+
+# --- Core Functions ---
+
+def connect_vpn():
+    """
+    Starts the C++ VPN client as a background process.
+    """
+    global vpn_process, is_connected
+
+    if is_connected:
+        log("Already connected.")
+        return
+
+    if not os.path.exists(CPP_EXECUTABLE_NAME):
+        messagebox.showerror("Error", f"Could not find the VPN core executable:\n'{CPP_EXECUTABLE_NAME}'\n\nPlease make sure it is in the same folder as this script.")
+        return
+
+    log(f"Starting VPN core: {CPP_EXECUTABLE_NAME}...")
+    try:
+        # Start the C++ process. We hide the console window for a cleaner experience.
+        # We also redirect its output so we can log it.
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        
+        vpn_process = subprocess.Popen(
+            [CPP_EXECUTABLE_NAME],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            startupinfo=startupinfo,
+            creationflags=subprocess.CREATE_NO_WINDOW, # Hide console window
+            text=True
+        )
+        is_connected = True
+        log("VPN Core process started.")
+        update_ui_status()
+        
+        # Start threads to monitor the output of the C++ process
+        threading.Thread(target=log_subprocess_output, args=(vpn_process.stdout,), daemon=True).start()
+        threading.Thread(target=log_subprocess_output, args=(vpn_process.stderr,), daemon=True).start()
+
+    except Exception as e:
+        log(f"Failed to start VPN core: {e}")
+        messagebox.showerror("Error", f"An error occurred while starting the VPN core:\n{e}")
+        is_connected = False
+        vpn_process = None
+        update_ui_status()
+
+def disconnect_vpn():
+    """
+    Terminates the C++ VPN client process.
+    """
+    global vpn_process, is_connected
+    if not is_connected or not vpn_process:
+        log("Already disconnected.")
+        return
+
+    log("Stopping VPN core process...")
+    try:
+        vpn_process.terminate()
+        vpn_process.wait() # Wait for the process to fully exit
+        log("VPN Core process stopped.")
+    except Exception as e:
+        log(f"Error while stopping VPN core: {e}")
+    finally:
+        is_connected = False
+        vpn_process = None
+        update_ui_status()
+
+def log_subprocess_output(pipe):
+    """
+    Reads output from the subprocess pipe and logs it to the GUI.
+    """
+    try:
+        for line in iter(pipe.readline, ''):
+            log(f"[Core] {line.strip()}")
+        pipe.close()
+    except Exception as e:
+        log(f"Error reading from core process pipe: {e}")
+
+
+# --- GUI Functions ---
+
+def log(message):
+    """Adds a message to the log window in a thread-safe way."""
+    log_area.config(state=tk.NORMAL)
+    log_area.insert(tk.END, message + "\n")
+    log_area.config(state=tk.DISABLED)
+    log_area.see(tk.END)
+
+def update_ui_status():
+    """Updates button states and status label based on connection status."""
+    if is_connected:
+        status_label.config(text="Status: Connected", fg="#2E8B57") # SeaGreen
+        connect_button.config(state=tk.DISABLED)
+        disconnect_button.config(state=tk.NORMAL)
+    else:
+        status_label.config(text="Status: Disconnected", fg="#B22222") # FireBrick
+        connect_button.config(state=tk.NORMAL)
+        disconnect_button.config(state=tk.DISABLED)
+
+def on_closing():
+    """Handles window close event."""
+    if is_connected:
+        disconnect_vpn()
+    root.destroy()
+
+# --- GUI Setup ---
+root = tk.Tk()
+root.title("My Professional VPN")
+root.geometry("650x450")
+root.configure(bg="#F0F0F0")
+
+# Main Frame
+main_frame = tk.Frame(root, padx=15, pady=15, bg="#F0F0F0")
+main_frame.pack(fill=tk.BOTH, expand=True)
+
+# Title Label
+title_label = tk.Label(main_frame, text="My Professional VPN", fg="#333", bg="#F0F0F0", font=("Helvetica", 18, "bold"))
+title_label.pack(pady=(0, 10))
+
+# Status Label
+status_label = tk.Label(main_frame, text="Status: Disconnected", fg="#B22222", bg="#F0F0F0", font=("Helvetica", 14, "bold"))
+status_label.pack(pady=10)
+
+# Buttons Frame
+button_frame = tk.Frame(main_frame, bg="#F0F0F0")
+button_frame.pack(pady=15)
+
+connect_button = tk.Button(button_frame, text="Connect", command=lambda: threading.Thread(target=connect_vpn).start(), font=("Helvetica", 12, "bold"), bg="#4CAF50", fg="white", relief=tk.FLAT, padx=20, pady=5)
+connect_button.pack(side=tk.LEFT, padx=10)
+
+disconnect_button = tk.Button(button_frame, text="Disconnect", command=disconnect_vpn, state=tk.DISABLED, font=("Helvetica", 12, "bold"), bg="#f44336", fg="white", relief=tk.FLAT, padx=20, pady=5)
+disconnect_button.pack(side=tk.LEFT, padx=10)
+
+# Log Area
+log_frame = tk.LabelFrame(main_frame, text="Connection Log", bg="#F0F0F0", fg="#555", font=("Helvetica", 10))
+log_frame.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
+log_area = scrolledtext.ScrolledText(log_frame, state=tk.DISABLED, wrap=tk.WORD, bg="#FFFFFF", relief=tk.SUNKEN, borderwidth=1, font=("Consolas", 9))
+log_area.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+# --- Start Application ---
+if __name__ == "__main__":
+    update_ui_status()
+    root.protocol("WM_DELETE_WINDOW", on_closing)
+    root.mainloop()
