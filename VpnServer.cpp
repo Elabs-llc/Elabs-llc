@@ -1,20 +1,23 @@
 // vpn_server.cpp
 // A foundational C++ program for the server-side of our VPN.
-// It listens for a client, receives raw IP packets, and prints their info.
-//
-// How to compile (using MSVC compiler from a Developer Command Prompt):
-// > cl.exe vpn_server.cpp /EHsc ws2_32.lib
+// It listens for a client, receives raw IP packets, and forwards them using a raw socket.
 //
 // How to compile (on Linux with g++):
 // > g++ vpn_server.cpp -o vpn_server -lpthread
+//
+// How to run (on Linux):
+// > sudo ./vpn_server 
+// (Root permissions are required to create raw sockets)
 
 #ifdef _WIN32
+    #error This server code is designed for Linux for raw socket forwarding.
     #include <winsock2.h>
     #include <ws2tcpip.h>
     #pragma comment(lib, "ws2_32.lib")
 #else // For Linux/macOS
     #include <sys/socket.h>
     #include <netinet/in.h>
+    #include <netinet/ip.h> // For IP header structure
     #include <unistd.h>
     #include <arpa/inet.h>
     #define SOCKET int
@@ -35,26 +38,16 @@ void handle_client(SOCKET clientSocket);
 int main() {
     std::cout << "--- C++ VPN Server ---" << std::endl;
 
-#ifdef _WIN32
-    // Initialize Winsock
-    WSADATA wsaData;
-    int result = WSAStartup(MAKEWORD(2, 2), &wsaData);
-    if (result != 0) {
-        std::cerr << "[ERROR] WSAStartup failed: " << result << std::endl;
-        return 1;
-    }
-    std::cout << "[INFO] Winsock initialized." << std::endl;
-#endif
-
     SOCKET listenSocket = INVALID_SOCKET;
     listenSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (listenSocket == INVALID_SOCKET) {
         std::cerr << "[ERROR] Socket creation failed." << std::endl;
-        #ifdef _WIN32
-        WSACleanup();
-        #endif
         return 1;
     }
+
+    // Allow socket reuse
+    int opt = 1;
+    setsockopt(listenSocket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
     // Bind the socket to an IP address and port
     sockaddr_in serverAddr;
@@ -65,9 +58,6 @@ int main() {
     if (bind(listenSocket, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR) {
         std::cerr << "[ERROR] Bind failed." << std::endl;
         closesocket(listenSocket);
-        #ifdef _WIN32
-        WSACleanup();
-        #endif
         return 1;
     }
 
@@ -75,9 +65,6 @@ int main() {
     if (listen(listenSocket, SOMAXCONN) == SOCKET_ERROR) {
         std::cerr << "[ERROR] Listen failed." << std::endl;
         closesocket(listenSocket);
-        #ifdef _WIN32
-        WSACleanup();
-        #endif
         return 1;
     }
 
@@ -91,7 +78,11 @@ int main() {
             continue;
         }
         
-        std::cout << "[INFO] Client connected. Starting handler thread..." << std::endl;
+        sockaddr_in client_addr;
+        socklen_t client_len = sizeof(client_addr);
+        getpeername(clientSocket, (struct sockaddr*)&client_addr, &client_len);
+        std::cout << "[INFO] Client connected from " << inet_ntoa(client_addr.sin_addr) << ". Starting handler thread..." << std::endl;
+        
         // Create a new thread to handle the client
         std::thread clientThread(handle_client, clientSocket);
         clientThread.detach(); // Detach the thread to run independently
@@ -99,10 +90,6 @@ int main() {
 
     // Cleanup
     closesocket(listenSocket);
-    #ifdef _WIN32
-    WSACleanup();
-    #endif
-
     return 0;
 }
 
@@ -121,24 +108,49 @@ void handle_client(SOCKET clientSocket) {
             std::cout << "\n--- Received Packet from Client (" << bytes_received << " bytes) ---" << std::endl;
             print_packet_info(buffer.data(), bytes_received);
 
-            // --- FORWARDING LOGIC (Placeholder) ---
-            // In a real VPN, you would:
-            // 1. Decrypt this packet.
-            // 2. Open a raw socket on the server.
-            // 3. Send the packet to its original destination on the internet.
-            // 4. Receive the response via the raw socket.
-            // 5. Encrypt the response.
-            // 6. Send the encrypted response back to the client via clientSocket.
+            // --- REAL FORWARDING LOGIC ---
+            // 1. Create a raw socket to send the packet to the internet.
+            SOCKET rawSocket = socket(AF_INET, SOCK_RAW, IPPROTO_RAW);
+            if (rawSocket == INVALID_SOCKET) {
+                perror("[ERROR] Failed to create raw socket. Are you root?");
+                continue;
+            }
 
-            // For now, we'll just echo a simple message back.
-            const char* response = "Packet Received";
-            send(clientSocket, response, strlen(response), 0);
+            // 2. Get the destination address from the packet header.
+            struct iphdr* ip_header = (struct iphdr*)buffer.data();
+            sockaddr_in destAddr;
+            destAddr.sin_family = AF_INET;
+            destAddr.sin_addr.s_addr = ip_header->daddr;
+
+            // 3. Send the packet.
+            if (sendto(rawSocket, buffer.data(), bytes_received, 0, (struct sockaddr*)&destAddr, sizeof(destAddr)) < 0) {
+                perror("[ERROR] sendto failed on raw socket");
+                closesocket(rawSocket);
+                continue;
+            }
+            std::cout << "  [FORWARD] Packet sent to destination." << std::endl;
+            
+            // 4. Wait for the response on the same raw socket.
+            // NOTE: This is a simplified approach. A production VPN would use a more
+            // sophisticated method (like libpcap or full NAT) to handle responses.
+            std::vector<unsigned char> recv_buffer(BUFFER_SIZE);
+            int response_bytes = recvfrom(rawSocket, (char*)recv_buffer.data(), BUFFER_SIZE, 0, NULL, NULL);
+
+            if (response_bytes > 0) {
+                 std::cout << "  [RESPONSE] Received " << response_bytes << " bytes from destination." << std::endl;
+                 // 5. Send the response back to the client.
+                 if (send(clientSocket, (char*)recv_buffer.data(), response_bytes, 0) < 0) {
+                     perror("[ERROR] Failed to send response back to client");
+                 }
+            }
+            
+            closesocket(rawSocket);
 
         } else if (bytes_received == 0) {
             std::cout << "[INFO] Client disconnected." << std::endl;
             break;
         } else {
-            std::cerr << "[ERROR] recv failed." << std::endl;
+            perror("[ERROR] recv from client failed");
             break;
         }
     }
@@ -155,8 +167,13 @@ void print_packet_info(const unsigned char* buffer, int len) {
         std::cout << "  Packet too small to be a valid IP packet." << std::endl;
         return;
     }
-    unsigned char ip_version = (buffer[0] >> 4);
-    std::cout << "  IP Version: " << (int)ip_version << std::endl;
-    std::cout << "  Source IP: " << (int)buffer[12] << "." << (int)buffer[13] << "." << (int)buffer[14] << "." << (int)buffer[15] << std::endl;
-    std::cout << "  Destination IP: " << (int)buffer[16] << "." << (int)buffer[17] << "." << (int)buffer[18] << "." << (int)buffer[19] << std::endl;
+    struct iphdr* ip_header = (struct iphdr*)buffer;
+    char source_ip[INET_ADDRSTRLEN];
+    char dest_ip[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &(ip_header->saddr), source_ip, INET_ADDRSTRLEN);
+    inet_ntop(AF_INET, &(ip_header->daddr), dest_ip, INET_ADDRSTRLEN);
+
+    std::cout << "  IP Version: " << (int)ip_header->version << std::endl;
+    std::cout << "  Source IP: " << source_ip << std::endl;
+    std::cout << "  Destination IP: " << dest_ip << std::endl;
 }
